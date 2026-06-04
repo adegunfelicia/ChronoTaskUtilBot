@@ -1,18 +1,17 @@
 import os
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Setup logging to view inside the Render dashboard logs
+# Setup logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Fallback token checking
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -32,7 +31,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def time_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Returns the current server UTC time elements."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     time_response = (
         "📊 **Current Server Metrics (UTC):**\n"
         f"• Date: `{now.strftime('%Y-%m-%d')}`\n"
@@ -63,13 +62,11 @@ async def timer_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """Adds a background Job to the built-in JobQueue."""
     chat_id = update.effective_message.chat_id
     try:
-        # Extract the duration from the message arguments
         due = float(context.args[0])
         if due <= 0:
             await update.message.reply_text("Please specify a positive number of seconds.")
             return
 
-        # Use the built-in job_queue provided natively by python-telegram-bot
         context.job_queue.run_once(alarm, due, chat_id=chat_id, name=str(chat_id), data=int(due))
         await update.message.reply_text(f"⏳ Timer successfully set for `{int(due)}` seconds!", parse_mode="Markdown")
 
@@ -96,19 +93,21 @@ def main() -> None:
         logger.critical("Error: TELEGRAM_BOT_TOKEN environment variable is missing!")
         return
 
-    # Build the application container natively
+    # Create explicit new loop policy context for python 3.12+ stability
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
     application = Application.builder().token(TOKEN).build()
 
-    # Register text commands
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("time", time_command))
     application.add_handler(CommandHandler("caps", caps_command))
     application.add_handler(CommandHandler("timer", timer_command))
-
-    # Register default messaging diagnostics fallback
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo_diagnostics))
 
-    # Run polling loop indefinitely (Perfect environment setup for Background Worker types)
     logger.info("Bot starting with Long Polling via Render Background Worker...")
     application.run_polling(drop_pending_updates=True)
 
